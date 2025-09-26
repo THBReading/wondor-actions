@@ -138,6 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+venv/
 env/
 venv/
 ENV/
@@ -198,6 +199,12 @@ cython_debug/
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
+.cursorignore
+.cursorindexingignore
+
+# Node
+node_modules
+/map-sprite.*
 .cursorignore
 .cursorindexingignore
 

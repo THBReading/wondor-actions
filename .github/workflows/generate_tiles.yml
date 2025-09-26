@@ -1,0 +1,53 @@
+name: Generate and Upload Prototiles
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+  # Runs on a schedule (every day at midnight UTC)
+  # schedule:
+  #   - cron: '0 0 * * *'
+
+jobs:
+  build-and-upload-tiles:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase
+          pip install dotenv
+
+      - name: Install tippecanoe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential zlib1g-dev
+          git clone https://github.com/mapbox/tippecanoe.git
+          cd tippecanoe
+          make -j
+          sudo make install
+          cd ..
+          tippecanoe --version
+
+      - name: Generate tiles and upload to Supabase
+        env:
+          # These secrets must be configured in your GitHub repository settings
+          # under Settings > Secrets and variables > Actions
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/generate_tiles.py
+
+      - name: Clean up generated files
+        if: always() # This step runs even if previous steps fail
+        run: |
+          rm -f articles.geojson articles.pmtiles
+
