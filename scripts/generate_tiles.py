@@ -1,9 +1,13 @@
 # generate_tiles.py
 import os
 import json
+import sys
 import subprocess
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+# Load environment variables from .env file for local development
+load_dotenv()
 
 # --- Configuration ---
 # Supabase connection details from environment variables
@@ -11,7 +15,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY")
 
 # Supabase table and storage details
-SOURCE_TABLE_NAME = "external_articles"
+SOURCE_VIEW_NAME = "external_articles_geojson"
 STORAGE_BUCKET_NAME = "tiles"
 OUTPUT_PMTILES_FILE = "articles.pmtiles"
 OUTPUT_GEOJSON_FILE = "articles.geojson"
@@ -43,40 +47,50 @@ TIPPECANOE_OPTIONS = [
     OUTPUT_GEOJSON_FILE           # input GeoJSON
 ]
 
-# --- Main Script ---
+# --- Initialization ---
+
+if not all([SUPABASE_URL, SUPABASE_SECRET_KEY]):
+    print("Error: SUPABASE_URL and SUPABASE_SECRET_KEY environment variables must be set.", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+except Exception as e:
+    print(f"Error initializing Supabase client: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# --- Core Functions ---
 
 def fetch_data_as_geojson(client: Client) -> dict:
     """Fetches data from Supabase and converts it to a GeoJSON FeatureCollection."""
-    print(f"Fetching data from '{SOURCE_TABLE_NAME}' table...")
-    resp = client.table("external_articles_geojson").select("url, title, location, marker").execute()
+    print(f"Fetching data from '{SOURCE_VIEW_NAME}' view...")
+    resp = client.table(SOURCE_VIEW_NAME).select("url, title, location, marker").execute()
     rows = resp.data
     features = []
-    for r in rows:
+    for i, row in enumerate(rows):
         geom = None
-        if r.get("location"):
+        if location_data := row.get("location"):
             try:
-                geom = json.loads(r["location"])
-            except Exception:
-                geom = r["location"]
+                # If location is a string, parse it. Otherwise, assume it's valid GeoJSON.
+                geom = json.loads(location_data) if isinstance(location_data, str) else location_data
+            except json.JSONDecodeError:
+                print(f"Warning: Could not parse location for row {i}. Skipping geometry.", file=sys.stderr)
+                geom = None
+
         feature = {
             "type": "Feature", 
-            "id": rows.index(r),
+            "id": i,
             "geometry": geom,        
             "properties": {            
-                "url": r.get("url"),            
-                "title": r.get("title"),
-                "marker": r.get("marker"),
+                "url": row.get("url"),
+                "title": row.get("title"),
+                "marker": row.get("marker"),
             },
         }
         features.append(feature)
-    feature_collection = {
-        "type": "FeatureCollection" , 
-        "features": features
-        }
-       
-    # print(json.dumps(feature_collection, indent=2))
-    return feature_collection
 
+    print(f"Fetched {len(features)} features.")
+    return {"type": "FeatureCollection", "features": features}
    
 def save_geojson_to_file(geojson_data: dict, filename: str):
     """Saves GeoJSON data to a local file."""
@@ -95,14 +109,18 @@ def generate_tiles():
 def upload_to_storage(client: Client):
     """Uploads the generated PMTiles file to Supabase Storage."""
     print(f"Uploading '{OUTPUT_PMTILES_FILE}' to bucket '{STORAGE_BUCKET_NAME}'...")
+    # It's crucial to set the content type for PMTiles to enable HTTP Range Requests.
+    file_options = {"contentType": "application/octet-stream", "cache-control": "3600"}
     try:
         with open(OUTPUT_PMTILES_FILE, 'rb') as f:
-            # The 'file_options' are important for serving tiles correctly.
-            client.storage.from_(STORAGE_BUCKET_NAME).upload(
+            response = client.storage.from_(STORAGE_BUCKET_NAME).upload(
                 path=OUTPUT_PMTILES_FILE,
                 file=f,
-                file_options={"cache-control": "3600", "upsert": "true", "content-type": "application/octet-stream"}
+                file_options=file_options,
+                upsert=True
             )
+        if response.status_code >= 300:
+            raise Exception(f"Upload failed with status {response.status_code}: {response.text}")
         print("Upload successful.")
     except Exception as e:
         print(f"Error uploading to storage: {e}")
@@ -118,41 +136,29 @@ def cleanup_files(*filenames):
         except FileNotFoundError:
             print(f"'{filename}' not found, skipping cleanup.")
         except Exception as e:
-            # Don't fail the whole script for a cleanup error, just log it.
-            print(f"Warning: Could not remove file {filename}. Error: {e}")
+            print(f"Warning: Could not remove file {filename}. Error: {e}", file=sys.stderr)
 
 def main():
     """Main execution function."""
-    # Load environment variables from .env file for local development
-    load_dotenv()
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY")
-    if not all([SUPABASE_URL, SUPABASE_SECRET_KEY]):
-        print("Error: SUPABASE_URL and SUPABASE_SECRET_KEY environment variables must be set.")
-        exit(1)
-
-    # 1. Initialize Supabase client
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
-
     try:
-        # 2. Fetch data and create GeoJSON
+        # 1. Fetch data and create GeoJSON
         geojson_data = fetch_data_as_geojson(supabase)
         if not geojson_data or not geojson_data['features']:
             print("No features to process. Exiting.")
             return
 
-        # 3. Save GeoJSON to a file
+        # 2. Save GeoJSON to a file
         save_geojson_to_file(geojson_data, OUTPUT_GEOJSON_FILE)
 
-        # 4. Generate PMTiles via tippecanoe
+        # 3. Generate PMTiles via tippecanoe
         generate_tiles()
 
-        # 5. Upload the PMTiles file to Supabase Storage
+        # 4. Upload the PMTiles file to Supabase Storage
         upload_to_storage(supabase)
 
         print("\n✅ PMTiles generation and upload complete!")
     finally:
-        # 6. Clean up local files
+        # 5. Clean up local files
         cleanup_files(OUTPUT_GEOJSON_FILE, OUTPUT_PMTILES_FILE)
 
 if __name__ == "__main__":

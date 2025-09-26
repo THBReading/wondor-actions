@@ -45,9 +45,3 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python scripts/generate_tiles.py
-
-      - name: Clean up generated files
-        if: always() # This step runs even if previous steps fail
-        run: |
-          rm -f articles.geojson articles.pmtiles
-

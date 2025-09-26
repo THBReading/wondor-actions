@@ -24,7 +24,7 @@ jobs:
         run: pnpm install
       - name: Generate sprite
         run: pnpm run sprite
-        env: # Or as an environment variable
+        env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       - name: Upload sprite as artifact
