@@ -5,17 +5,25 @@ on:
 jobs:
   generate-sprite:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Set up Node.js 20
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
+          cache: "pnpm"
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install
       - name: Generate sprite
-        run: npx ts-node scripts/generate-sprite.ts
+        run: pnpm run sprite
       - name: Upload sprite as artifact
         uses: actions/upload-artifact@v4
         with:
