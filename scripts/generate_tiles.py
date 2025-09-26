@@ -110,17 +110,14 @@ def upload_to_storage(client: Client):
     """Uploads the generated PMTiles file to Supabase Storage."""
     print(f"Uploading '{OUTPUT_PMTILES_FILE}' to bucket '{STORAGE_BUCKET_NAME}'...")
     # It's crucial to set the content type for PMTiles to enable HTTP Range Requests.
-    file_options = {"contentType": "application/octet-stream", "cache-control": "3600"}
+    file_options = {"contentType": "application/octet-stream", "cache-control": "3600", "upsert": "true"}
     try:
         with open(OUTPUT_PMTILES_FILE, 'rb') as f:
             response = client.storage.from_(STORAGE_BUCKET_NAME).upload(
                 path=OUTPUT_PMTILES_FILE,
                 file=f,
                 file_options=file_options,
-                upsert=True
             )
-        if response.status_code >= 300:
-            raise Exception(f"Upload failed with status {response.status_code}: {response.text}")
         print("Upload successful.")
     except Exception as e:
         print(f"Error uploading to storage: {e}")
